@@ -1,21 +1,17 @@
 ## Scala development kit for prismic.io
 
+[![Build Status](https://api.travis-ci.org/prismicio/scala-kit.png)](https://travis-ci.org/prismicio/scala-kit)
+
 ### Getting started
 
 #### Install the kit for your project with Maven
 
 You can find this library in our own Maven repository (hosted on Github).
 
-If you are using __sbt__, first add the reposiotry resolver:
-
-```
-resolvers += "Prismic.io kits" at "https://s3.amazonaws.com/prismic-maven-kits/repository/maven/"
-```
-
 Then add, the library dependency:
 
 ```
-"io.prismic" %% "scala-kit" % "1.0-M16"
+"io.prismic" %% "scala-kit" % "1.0.14"
 ```
 
 *(you may need to adapt the version number)*
