@@ -43,9 +43,13 @@ final class Api(
   def bookmarks: Map[String, String] = data.bookmarks
   def forms: Map[String, SearchForm] = data.forms.mapValues(form => SearchForm(this, form, form.defaultData))
   def master: Ref = refs.values.collectFirst { case ref if ref.isMasterRef => ref }.getOrElse(sys.error("no master reference found"))
+  def experiments: List[Experiment] = data.experiments
+  def experiment: Option[Experiment] = experiments.headOption
 
   def oauthInitiateEndpoint = data.oauthEndpoints._1
   def oauthTokenEndpoint = data.oauthEndpoints._2
+
+  def experimentCookieName = "prismic.experiment-variation"
 }
 
 /**
@@ -117,7 +121,10 @@ object Api {
           }
         }
     }.map { json =>
-      new Api(ApiData.reader.reads(json).getOrElse(sys.error(s"Error while parsing API document: ${json}")), accessToken, cache, logger)
+      new Api(ApiData.reader.reads(json).fold(
+        err => sys.error(s"Error while parsing API document: ${json}\n$err"),
+        identity
+      ), accessToken, cache, logger)
     }
   }
 
@@ -183,15 +190,17 @@ private[prismic] object Form {
 }
 
 private[prismic] case class ApiData(
-  val refs: Seq[Ref],
-  val bookmarks: Map[String, String],
-  val types: Map[String, String],
-  val tags: Seq[String],
-  val forms: Map[String, Form],
-  val oauthEndpoints: (String, String))
+  refs: Seq[Ref],
+  bookmarks: Map[String, String],
+  types: Map[String, String],
+  tags: Seq[String],
+  forms: Map[String, Form],
+  oauthEndpoints: (String, String),
+  experiments: List[Experiment])
 
 private[prismic] object ApiData {
 
+  import Experiment.experimentReads
   implicit val reader = (
     (__ \ 'refs).read[Seq[Ref]] and
     (__ \ 'bookmarks).read[Map[String, String]] and
@@ -201,7 +210,8 @@ private[prismic] object ApiData {
     (
       (__ \ 'oauth_initiate).read[String] and
         (__ \ 'oauth_token).read[String] tupled
-    )
+    ) and
+      (__ \ 'experiments).readNullable[List[Experiment]].map(_ getOrElse Nil)
   )(ApiData.apply _)
 
 }
@@ -229,8 +239,7 @@ case class Response(
   totalResultsSize: Int,
   totalPages: Int,
   nextPage: Option[String],
-  prevPage: Option[String]
-)
+  prevPage: Option[String])
 
 private[prismic] object Response {
 
@@ -278,6 +287,20 @@ case class SearchForm(api: Api, form: Form, data: Map[String, Seq[String]]) {
   def ref(r: Ref): SearchForm = ref(r.ref)
   def ref(r: String): SearchForm = set("ref", r)
 
+  def variation(id: Int): SearchForm = api.experiment flatMap (_.variations lift id) match {
+    case None    => this
+    case Some(v) => ref(v)
+  }
+  def variation(id: String): SearchForm = parseIntOption(id).fold(this)(variation)
+  def variation(id: Option[String]): SearchForm = id.fold(this)(variation)
+
+  private def parseIntOption(str: String): Option[Int] = try {
+    Some(java.lang.Integer.parseInt(str))
+  }
+  catch {
+    case e: NumberFormatException => None
+  }
+
   def query(query: String) = {
     if (form.fields.get("q").map(_.multiple).getOrElse(false)) {
       set("q", query)
@@ -311,6 +334,8 @@ case class SearchForm(api: Api, form: Form, data: Map[String, Seq[String]]) {
           }
           encoder.toString()
         }
+
+        println(url)
 
         api.cache.get(url).map { json =>
           Future.successful(parseResponse(json))
